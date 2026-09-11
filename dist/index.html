@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d4fa44"><meta name="description" content="Nine chunky tiles. Eight hidden words. Play Grid Blitz, a little word puzzle with a Sudoku twist.">
+<title>Grid Blitz — A little grid. A big brain break.</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d4fa44'/%3E%3Cpath d='M18 3 7 18h8l-1 11 11-16h-8z' fill='%23222222'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css"><script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="site-shell">
+<header class="header">
+<a class="brand" href="/" aria-label="Grid Blitz homepage"><span class="brand-mark" aria-hidden="true">ϟ</span><span>GRID<span class="brand-light">BLITZ</span><span class="brand-period">.</span></span></a>
+<div class="header-right"><span class="header-caption">YOUR DAILY DOSE OF AHA.</span><button class="text-button help-button" data-action="help"><span class="question-icon" aria-hidden="true">?</span><span>How to play</span></button></div>
+</header>
+<main>
+<div class="puzzle-heading"><div><p class="eyebrow">A WORD PUZZLE. WITH A TWIST.</p><h1>Find your <span>fit.</span></h1></div><div class="puzzle-tag"><span class="tiny-bolt" aria-hidden="true">ϟ</span> <span id="puzzle-number">PUZZLE 01</span></div></div>
+<div class="play-layout">
+<aside class="rules-panel"><p class="eyebrow section-label">THE GAME PLAN</p><h2>Words meet<br>numbers.</h2><p class="intro-copy">A little Scrabble.<br>A little Sudoku.<br>A whole lot of aha.</p><div class="rule"><div class="rule-number">01</div><div><h3>Find your words</h3><p>Make 3-letter words across, down, and diagonally.</p></div></div><div class="rule"><div class="rule-number">02</div><div><h3>No repeats</h3><p>Each row and column needs a 1, 2, and 3. Numbers aren't points!</p></div></div><div class="rule"><div class="rule-number">03</div><div><h3>Make it click</h3><p>Tap a tile, then a square. Tap a placed tile to move it.</p></div></div><div class="note"><span aria-hidden="true">✳</span><p>Small grid.<br>Very big “got it!”</p></div></aside>
+<section class="game" aria-label="Grid Blitz puzzle">
+<div class="game-meta"><div class="difficulty"><span class="difficulty-bars" aria-hidden="true"><i></i><i></i><i></i></span><span id="difficulty">THE WARM-UP</span></div><div class="timer"><span aria-hidden="true">◷</span><span id="timer">0:00</span></div></div>
+<div class="board-wrapper"><div id="board" class="board" role="group" aria-label="3 by 3 puzzle grid"></div></div>
+<div class="board-status"><span id="placed-count">1 / 9 tiles placed</span><div class="progress-dots" id="progress-dots" aria-hidden="true"></div><span id="word-count">0 / 8 words</span></div>
+<div class="rack-header"><h2>Your tiles</h2><button class="text-button shuffle-button" data-action="shuffle"><span aria-hidden="true">⇄</span> Shuffle</button></div>
+<div class="rack" id="rack" role="group" aria-label="Available letter and number tiles"></div>
+<p class="instruction" id="instruction" aria-live="polite">Pick a tile. Find its place.</p>
+<div class="game-controls"><button class="utility-button" data-action="undo" id="undo-button" disabled><span aria-hidden="true">↶</span>Undo</button><button class="utility-button" data-action="hint" id="hint-button"><span aria-hidden="true">✧</span>Hint <span class="hint-count" id="hint-count">3</span></button><button class="primary-button" data-action="check" id="check-button">Check grid <span aria-hidden="true">↗</span></button></div>
+<div class="game-bottom"><button class="text-button" data-action="reset">Start over</button><span>No rush. Just a little brain buzz.</span></div>
+</section>
+<aside class="words-panel"><div class="word-title"><h2>Word watch</h2><span class="watch-count" id="watch-count">0/8</span></div><p class="words-description">Eight words hiding in plain sight.<br>Tap a line for a clue.</p><div id="word-lines"></div><div class="number-check"><div class="number-check-heading"><span class="number-icon" aria-hidden="true">123</span><h3>Number check</h3></div><div class="number-lines" id="number-lines"></div><p>1, 2, 3. Once in every row & column.</p></div></aside>
+</div>
+</main>
+<footer><span>MADE FOR YOUR AHA MOMENT.</span><span>9 TILES <i>·</i> 8 WORDS <i>·</i> 1 HAPPY BRAIN</span></footer>
+</div>
+<dialog id="modal" aria-labelledby="modal-title"><button class="modal-close" data-action="close" aria-label="Close dialog">×</button><div id="modal-content"></div></dialog>
+<div class="toast" id="toast" role="status"></div><div class="confetti" id="confetti" aria-hidden="true"></div>
+</body>
+</html>

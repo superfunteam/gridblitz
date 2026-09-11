@@ -1,0 +1,12 @@
+{
+  "name": "grid-blitz",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A mobile-first word puzzle with a mini Sudoku twist.",
+  "scripts": {
+    "dev": "python3 -m http.server 5173 --bind 0.0.0.0 --directory dist",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check dist/app.js && node --check dist/engine.js"
+  }
+}
