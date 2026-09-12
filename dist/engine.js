@@ -36,7 +36,7 @@ export function getPuzzle(round) {
 }
 export function newGame(round = 0) {
   const board = Array(9).fill(null); board[4] = 4;
-  return { version: 1, round, board, hints: 3, moves: 0, elapsed: 0, started: false, won: false };
+  return { version: 2, round, board, locked: [4], hints: 3, moves: 0, elapsed: 0, started: false, won: false };
 }
 export function evaluateBoard(board, puzzle) {
   const words = LINES.map(line => {
@@ -50,32 +50,49 @@ export function evaluateBoard(board, puzzle) {
   });
   return { words, numbers, placed: board.filter(id => id !== null).length, wordCount: words.filter(w => w.valid).length, solved: words.every(w => w.valid) && numbers.every(n => n.valid) };
 }
-export function moveTile(board, tileId, destination) {
+export function moveTile(board, tileId, destination, locked = [4]) {
   if (!Number.isInteger(tileId) || tileId < 0 || tileId > 8 || !Number.isInteger(destination) || destination < 0 || destination > 8) throw new Error('Choose a valid tile and square.');
-  if (tileId === 4 || destination === 4) throw new Error('The center tile stays put.');
+  const source = board.indexOf(tileId);
+  if (tileId === 4 || locked.includes(source) || locked.includes(destination)) throw new Error('Green tiles are locked in place.');
   const next = [...board];
-  const source = next.indexOf(tileId);
   if (source === destination) return next;
   if (source !== -1) next[source] = next[destination];
   next[destination] = tileId;
   return next;
 }
-export function removeTile(board, position) {
-  if (!Number.isInteger(position) || position < 0 || position > 8 || position === 4) throw new Error('Choose a movable tile.');
+export function removeTile(board, position, locked = [4]) {
+  if (!Number.isInteger(position) || position < 0 || position > 8 || locked.includes(position)) throw new Error('Green tiles are locked in place.');
   const next = [...board]; next[position] = null; return next;
 }
-export function hintMove(board, puzzle) {
+export function hintMove(board, puzzle, locked = [4], random = Math.random) {
   const same = (id, cell) => id !== null && puzzle.tiles[id].letter === puzzle.tiles[cell].letter && puzzle.tiles[id].number === puzzle.tiles[cell].number;
-  const target = board.findIndex((id, i) => !same(id, i));
-  if (target < 0) return null;
-  // Prefer an identical unused tile before moving an equivalent tile that is
-  // already correctly placed (some later puzzles contain repeated letters).
-  const candidates = puzzle.tiles.filter(t => t.letter === puzzle.tiles[target].letter && t.number === puzzle.tiles[target].number);
+  const targets = board.flatMap((id, cell) => !locked.includes(cell) && !same(id, cell) ? [cell] : []);
+  if (!targets.length) return null;
+  const target = targets[Math.min(targets.length - 1, Math.max(0, Math.floor(random() * targets.length)))];
+  const candidates = puzzle.tiles.filter(tile => !locked.includes(board.indexOf(tile.id)) && same(tile.id, target));
+  // Equivalent tiles may share a letter and number. Prefer an unused tile,
+  // then a misplaced one, so a correct or permanently locked tile stays put.
   const tile = candidates.find(t => !board.includes(t.id)) ?? candidates.find(t => !same(t.id, board.indexOf(t.id))) ?? candidates[0];
-  return { board: moveTile(board, tile.id, target), target };
+  if (!tile) return null;
+  return { board: moveTile(board, tile.id, target, locked), target, locked: [...locked, target] };
+}
+export function preserveLockedTiles(snapshot, currentBoard, locked) {
+  // Undo still reverses earlier ordinary moves, but never removes a hint or
+  // reintroduces its tile elsewhere. Displaced historical tiles return to the rack.
+  const fixedIds = new Set(locked.map(cell => currentBoard[cell]));
+  return snapshot.map((id, cell) => locked.includes(cell) ? currentBoard[cell] : fixedIds.has(id) ? null : id);
 }
 export function validSavedGame(value) {
-  if (!value || value.version !== 1 || !Number.isInteger(value.round) || value.round < 0 || value.round > 100000 || !Array.isArray(value.board) || value.board.length !== 9 || value.board[4] !== 4) return false;
+  if (!value || ![1, 2].includes(value.version) || !Number.isInteger(value.round) || value.round < 0 || value.round > 100000 || !Array.isArray(value.board) || value.board.length !== 9 || value.board[4] !== 4) return false;
   const ids = value.board.filter(x => x !== null);
-  return ids.every(x => Number.isInteger(x) && x >= 0 && x < 9) && new Set(ids).size === ids.length && Number.isInteger(value.hints) && value.hints >= 0 && value.hints <= 3 && Number.isInteger(value.moves) && value.moves >= 0 && Number.isFinite(value.elapsed) && value.elapsed >= 0 && typeof value.won === 'boolean' && typeof value.started === 'boolean';
+  if (!(ids.every(x => Number.isInteger(x) && x >= 0 && x < 9) && new Set(ids).size === ids.length && Number.isInteger(value.hints) && value.hints >= 0 && value.hints <= 3 && Number.isInteger(value.moves) && value.moves >= 0 && Number.isFinite(value.elapsed) && value.elapsed >= 0 && typeof value.won === 'boolean' && typeof value.started === 'boolean')) return false;
+  if (value.version === 1) return true;
+  const locked = value.locked;
+  if (!Array.isArray(locked) || !locked.includes(4) || locked.length > 4 - value.hints || new Set(locked).size !== locked.length) return false;
+  const puzzle = getPuzzle(value.round);
+  return locked.every(cell => Number.isInteger(cell) && cell >= 0 && cell < 9 && value.board[cell] !== null && puzzle.tiles[value.board[cell]].letter === puzzle.tiles[cell].letter && puzzle.tiles[value.board[cell]].number === puzzle.tiles[cell].number);
+}
+export function restoreGame(value) {
+  if (!validSavedGame(value)) return null;
+  return { ...value, version: 2, board: [...value.board], locked: value.version === 1 ? [4] : [...value.locked] };
 }

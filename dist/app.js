@@ -1,13 +1,15 @@
-import { LINES, PUZZLES, getPuzzle, newGame, evaluateBoard, moveTile, removeTile, hintMove, validSavedGame } from './engine.js';
+import { LINES, PUZZLES, getPuzzle, newGame, evaluateBoard, moveTile, removeTile, hintMove, preserveLockedTiles, restoreGame } from './engine.js';
+import { installTileDrag } from './drag.js';
 
 const $ = selector => document.querySelector(selector);
 const STORAGE_KEY = 'grid-blitz.game.v1';
 let game = newGame();
-try { const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); if (validSavedGame(saved)) game = saved; } catch { /* Storage is optional in private browsers. */ }
+try { const saved = restoreGame(JSON.parse(localStorage.getItem(STORAGE_KEY))); if (saved) game = saved; } catch { /* Storage is optional in private browsers. */ }
 let puzzle = getPuzzle(game.round);
 if (game.won && !evaluateBoard(game.board, puzzle).solved) game.won = false;
 let selectedTile = null, selectedCell = null, activeLine = null, checked = false;
 let order = [2,7,5,0,8,1,3,6];
+let tileDrag;
 let history = [], toastTimeout, popTimeout, modalOpener, lastTick = performance.now();
 const modal = $('#modal');
 const fmt = seconds => `${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
@@ -15,9 +17,9 @@ const save = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(game
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimeout); toastTimeout = setTimeout(() => $('#toast').classList.remove('visible'), 3300); }
 function announce(message) { $('#instruction').textContent = message; }
 function startClock() { if (!game.started) { game.started = true; lastTick = performance.now(); } }
-function tileMarkup(id, rack = false) {
+function tileMarkup(id, rack = false, locked = false) {
   const tile = puzzle.tiles[id];
-  return `<span class="tile-letter">${tile.letter}</span><span class="tile-number ${rack?'rack-number':''}">${tile.number}</span>${id===4&&!rack?'<span class="lock-mark" aria-hidden="true">▪</span>':''}`;
+  return `<span class="tile-letter">${tile.letter}</span><span class="tile-number ${rack?'rack-number':''}">${tile.number}</span>${locked&&!rack?'<span class="lock-mark" aria-hidden="true"></span>':''}`;
 }
 function render() {
   const focused = document.activeElement;
@@ -27,11 +29,12 @@ function render() {
   if (checked) result.words.filter(w=>w.complete&&!w.valid).forEach(w=>w.cells.forEach(c=>invalidCells.add(c)));
   $('#board').innerHTML = game.board.map((id,i) => {
     const tile = id === null ? null : puzzle.tiles[id];
-    const label = `Row ${Math.floor(i/3)+1}, column ${i%3+1}, ${tile ? `${tile.letter} ${tile.number}${i===4?', fixed':''}` : 'empty'}`;
-    return `<button class="cell ${tile?'occupied':''} ${i===4?'fixed':''} ${id!==null&&selectedTile===id?'selected':''} ${selectedCell===i?'target':''} ${activeLine!==null&&LINES[activeLine].cells.includes(i)?'line-highlight':''} ${invalidCells.has(i)?'invalid':''}" data-cell="${i}" aria-label="${label}" aria-pressed="${selectedCell===i || (id!==null&&selectedTile===id)}" ${tile&&i!==4&&!game.won?'draggable="true"':''}>${tile?tileMarkup(id):''}</button>`;
+    const locked = game.locked.includes(i);
+    const label = `Row ${Math.floor(i/3)+1}, column ${i%3+1}, ${tile ? `${tile.letter} ${tile.number}${locked?', locked green tile':''}` : 'empty'}`;
+    return `<button class="cell ${tile?'occupied':''} ${locked?'fixed':''} ${id!==null&&selectedTile===id?'selected':''} ${selectedCell===i?'target':''} ${activeLine!==null&&LINES[activeLine].cells.includes(i)?'line-highlight':''} ${invalidCells.has(i)?'invalid':''}" data-cell="${i}" ${tile?`data-occupant="${id}"`:""} data-locked="${locked}" aria-describedby="drag-instructions" aria-label="${label}" aria-pressed="${selectedCell===i || (id!==null&&selectedTile===id)}" draggable="${!!tile&&!locked&&!game.won}">${tile?tileMarkup(id,false,locked):''}</button>`;
   }).join('');
   const available = order.filter(id=>!game.board.includes(id));
-  $('#rack').innerHTML = available.map(id=>`<button class="tile ${selectedTile===id?'selected':''}" data-tile="${id}" draggable="${!game.won}" aria-label="Tile ${puzzle.tiles[id].letter} ${puzzle.tiles[id].number}" aria-pressed="${selectedTile===id}">${tileMarkup(id,true)}</button>`).join('') + '<div class="rack-slot" aria-hidden="true"></div>'.repeat(8-available.length);
+  $('#rack').innerHTML = available.map(id=>`<button class="tile ${selectedTile===id?'selected':''}" data-tile="${id}" aria-describedby="drag-instructions" draggable="${!game.won}" aria-label="Tile ${puzzle.tiles[id].letter} ${puzzle.tiles[id].number}" aria-pressed="${selectedTile===id}">${tileMarkup(id,true)}</button>`).join('') + '<div class="rack-slot" aria-hidden="true"></div>'.repeat(8-available.length);
   $('#placed-count').textContent = `${result.placed} / 9 tiles placed`;
   $('#word-count').textContent = `${result.wordCount} / 8 words`;
   $('#watch-count').textContent = `${result.wordCount}/8`;
@@ -47,9 +50,13 @@ function render() {
   $('#check-button').innerHTML = game.won ? 'Next puzzle <span aria-hidden="true">↗</span>' : 'Check grid <span aria-hidden="true">↗</span>';
   if (focusKey) $(focusKey)?.focus({preventScroll:true});
 }
-function changed(next, message, destination) {
-  history.push([...game.board]);
-  game.board = next; game.moves++; checked = false; activeLine = null;
+const sameBoard = (a, b) => a.every((id, i) => id === b[i]);
+function changed(next, message, destination, remember = true) {
+  if (remember && sameBoard(next, game.board)) { selectedTile=null; selectedCell=null; render(); announce('Your tile is already there.'); return; }
+  if (remember) history.push([...game.board]);
+  game.board = next;
+  while (history.length && sameBoard(history.at(-1), game.board)) history.pop();
+  game.moves++; checked = false; activeLine = null;
   selectedTile = null; selectedCell = null; startClock(); render(); save(); announce(message);
   if (destination !== undefined) {
     const cell = $(`[data-cell="${destination}"]`); cell?.focus({preventScroll:true}); cell?.classList.add('pop');
@@ -58,7 +65,7 @@ function changed(next, message, destination) {
 }
 function place(tileId, position) {
   if(game.won) return;
-  try { changed(moveTile(game.board,tileId,position),'Looking good. Keep connecting.',position); } catch(e) { toast(e.message); }
+  try { changed(moveTile(game.board,tileId,position,game.locked),'Looking good. Keep connecting.',position); } catch(e) { toast(e.message); }
 }
 function pickTile(id) {
   if(game.won) return;
@@ -68,19 +75,19 @@ function pickTile(id) {
 }
 function pickCell(position) {
   if(game.won) return;
-  if(position===4) { toast('This is your starting tile. It stays put!');return; }
+  if(game.locked.includes(position)) { toast('Green tiles are locked in place.');return; }
   if(selectedTile!==null) {
-    if(game.board[position]===selectedTile) { changed(removeTile(game.board,position),'Back on the rack. Try another spot.',position); return; }
+    if(game.board[position]===selectedTile) { changed(removeTile(game.board,position,game.locked),'Back on the rack. Try another spot.',position); return; }
     place(selectedTile,position);return;
   }
   if(game.board[position]!==null) { selectedTile=game.board[position]; selectedCell=null; announce('Tap another square to move. Tap again to remove.'); }
   else { selectedCell=selectedCell===position?null:position; announce(selectedCell===null?'Pick a tile. Find its place.':'Square selected. Pick a tile below.'); }
   activeLine=null; render();
 }
-function showModal(html) { modalOpener=document.activeElement; $('#modal-content').innerHTML=html; if(!modal.open)modal.showModal(); }
+function showModal(html) { tileDrag?.cancel(); modalOpener=document.activeElement; $('#modal-content').innerHTML=html; $('#modal-content h2')?.setAttribute('id','modal-title'); if(!modal.open)modal.showModal(); }
 function closeModal() { modal.close(); modalOpener?.focus?.({preventScroll:true}); lastTick=performance.now(); }
 function help() {
-  showModal(`<p class="modal-kicker">A LITTLE WORDPLAY</p><h2>Welcome to Grid Blitz.</h2><p>Fit all nine letter-and-number tiles into the grid. Each tile is one piece: its letter and number move together.</p><ol><li><strong>Make eight 3-letter words.</strong> Read across left to right, down top to bottom, and both diagonals from the top.</li><li><strong>Use 1, 2, and 3 exactly once</strong> in every row and column. The numbers aren’t points. Diagonals only need to be words.</li><li><strong>Tap a tile, then a square.</strong> Tap a placed tile to move it; tap it again to return it. The lime center stays put.</li></ol><p>Tap a line in Word watch for a clue. Need a nudge? A hint places one correct tile. You get three per puzzle.</p><button class="primary-button" data-action="close">Let’s play <span aria-hidden="true">↗</span></button>`);
+  showModal(`<p class="modal-kicker">A LITTLE WORDPLAY</p><h2>Welcome to Grid Blitz.</h2><p>Fit all nine letter-and-number tiles into the grid. Each tile is one piece: its letter and number move together.</p><ol><li><strong>Make eight 3-letter words.</strong> Read across left to right, down top to bottom, and both diagonals from the top.</li><li><strong>Use 1, 2, and 3 exactly once</strong> in every row and column. The numbers aren’t points. Diagonals only need to be words.</li><li><strong>Drag a tile onto a square.</strong> Drop on another tile to swap, or back in the rack to return it. You can also tap a tile, then a square. Green tiles stay put.</li></ol><p>Tap a line in Word watch for a clue. Need a nudge? Each hint permanently places a random correct tile and turns it green. Locked hints survive undo and reload. You get three per puzzle.</p><button class="primary-button" data-action="close">Let’s play <span aria-hidden="true">↗</span></button>`);
 }
 function check() {
   if(game.won) { nextPuzzle(); return; }
@@ -108,17 +115,20 @@ function shuffle(notify=true) { for(let i=order.length-1;i>0;i--){const j=Math.f
 function hint() {
   if(!game.hints||game.won)return;
   if(evaluateBoard(game.board,puzzle).solved){check();return;}
-  const h=hintMove(game.board,puzzle);if(!h)return;
-  game.hints--;changed(h.board,`A little nudge. ${game.hints} hint${game.hints===1?'':'s'} left.`,h.target);
-  toast(`${puzzle.tiles[game.board[h.target]].letter}${puzzle.tiles[game.board[h.target]].number} belongs in row ${Math.floor(h.target/3)+1}, column ${h.target%3+1}.`);
+  const h=hintMove(game.board,puzzle,game.locked);if(!h)return;
+  game.hints--;game.locked=h.locked;
+  history=history.map(snapshot=>preserveLockedTiles(snapshot,h.board,game.locked)).filter((snapshot,i,all)=>i===0||!sameBoard(snapshot,all[i-1]));
+  changed(h.board,`Locked in green. ${game.hints} hint${game.hints===1?'':'s'} left.`,h.target,false);
+  toast(`${puzzle.tiles[game.board[h.target]].letter}${puzzle.tiles[game.board[h.target]].number} is locked in row ${Math.floor(h.target/3)+1}, column ${h.target%3+1}.`);
 }
-function undo() { if(!history.length||game.won)return;game.board=history.pop();game.moves++;checked=false;activeLine=null;selectedTile=null;selectedCell=null;render();save();announce('One step back. A new way forward.'); }
+function undo() { if(!history.length||game.won)return;game.board=preserveLockedTiles(history.pop(),game.board,game.locked);while(history.length&&sameBoard(history.at(-1),game.board))history.pop();game.moves++;checked=false;activeLine=null;selectedTile=null;selectedCell=null;render();save();announce('One step back. A new way forward.'); }
 function showClue(index) {
   activeLine=index;render();const line=evaluateBoard(game.board,puzzle).words[index];
   showModal(`<p class="modal-kicker">${line.direction.toUpperCase()} · ${line.name.toUpperCase()}</p><h2>${line.valid?line.word:'A little clue.'}</h2><p>${line.valid && line.word !== LINES[index].cells.map(i=>puzzle.tiles[i].letter).join('') ? 'This word works here. Keep connecting the rest of the grid' : puzzle.clues[index]}.</p><p class="clue-note">${line.valid?'This line already makes a word. Nice work!':'This clue suggests one possible fit. Any valid 3-letter word works if the whole grid fits.'}</p><button class="primary-button" data-action="close">Got it <span aria-hidden="true">↗</span></button>`);
 }
 const actions={help,close:closeModal,shuffle,hint,undo,check,next:nextPuzzle,confirmReset:reset,reset:()=>showModal(`<p class="modal-kicker">FRESH EYES?</p><h2>Give it another go.</h2><p>Put your tiles back on the rack and restart this puzzle with three hints.</p><button class="primary-button" data-action="confirmReset">Start this puzzle over <span aria-hidden="true">↗</span></button><button class="text-button view-grid" data-action="close">Keep playing</button>`)};
 document.addEventListener('click',event=> {
+  if(tileDrag?.active)return;
   const action=event.target.closest('[data-action]');if(action){actions[action.dataset.action]?.();return;}
   const tile=event.target.closest('[data-tile]');if(tile){pickTile(Number(tile.dataset.tile));return;}
   const cell=event.target.closest('[data-cell]');if(cell){pickCell(Number(cell.dataset.cell));return;}
@@ -127,16 +137,32 @@ document.addEventListener('click',event=> {
 modal.addEventListener('click',e=>{if(e.target===modal){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeModal();}});
 modal.addEventListener('close',()=>{lastTick=performance.now();});
 document.addEventListener('keydown',e=>{
-  if(modal.open)return;
+  if(modal.open||tileDrag?.active)return;
   if(e.key==='Escape'){selectedTile=null;selectedCell=null;activeLine=null;render();announce('Pick a tile. Find its place.');return;}
   if(game.won||e.ctrlKey||e.metaKey||e.altKey)return;
   const focused=document.activeElement;
-  if(focused?.dataset.cell!==undefined){const pos=Number(focused.dataset.cell);const offsets={ArrowLeft:-1,ArrowRight:1,ArrowUp:-3,ArrowDown:3};if(e.key in offsets){e.preventDefault();$(`[data-cell="${(pos+offsets[e.key]+9)%9}"]`)?.focus();return;}if((e.key==='Backspace'||e.key==='Delete')&&pos!==4&&game.board[pos]!==null){e.preventDefault();changed(removeTile(game.board,pos),'Tile returned to the rack.',pos);return;}}
+  if(focused?.dataset.cell!==undefined){const pos=Number(focused.dataset.cell);const offsets={ArrowLeft:-1,ArrowRight:1,ArrowUp:-3,ArrowDown:3};if(e.key in offsets){e.preventDefault();$(`[data-cell="${(pos+offsets[e.key]+9)%9}"]`)?.focus();return;}if((e.key==='Backspace'||e.key==='Delete')&&!game.locked.includes(pos)&&game.board[pos]!==null){e.preventDefault();changed(removeTile(game.board,pos,game.locked),'Tile returned to the rack.',pos);return;}}
   if(/^[a-z]$/i.test(e.key)){const ids=order.filter(id=>!game.board.includes(id)&&puzzle.tiles[id].letter===e.key.toUpperCase());if(ids.length){e.preventDefault();pickTile(ids[(ids.indexOf(selectedTile)+1)%ids.length]);}}
 });
-document.addEventListener('dragstart',e=>{const tile=e.target.closest('[data-tile]');const cell=e.target.closest('[data-cell]');const id=tile?Number(tile.dataset.tile):cell?game.board[Number(cell.dataset.cell)]:null;if(id===null||id===4||game.won){e.preventDefault();return;}e.dataTransfer.setData('text/plain',String(id));e.dataTransfer.effectAllowed='move';});
-document.addEventListener('dragover',e=>{if(e.target.closest('[data-cell],#rack'))e.preventDefault();});
-document.addEventListener('drop',e=>{const raw=e.dataTransfer.getData('text/plain');if(!/^[0-8]$/.test(raw))return;const id=Number(raw);if(id===4||game.won)return;const cell=e.target.closest('[data-cell]');if(cell){e.preventDefault();place(id,Number(cell.dataset.cell));}else if(e.target.closest('#rack')){e.preventDefault();const source=game.board.indexOf(id);if(source!==-1)changed(removeTile(game.board,source),'Tile returned to the rack.');}});
+tileDrag=installTileDrag({
+  board:$('#board'),rack:$('#rack'),announce,
+  isPlaying:()=>!game.won&&!modal.open,
+  canMove:id=>Number.isInteger(id)&&id>=0&&id<9&&!game.won&&!modal.open&&!game.locked.includes(game.board.indexOf(id)),
+  canDrop:(id,position)=>!game.locked.includes(position),
+  onStart:()=>{
+    selectedTile=null;selectedCell=null;activeLine=null;
+    document.querySelectorAll('.selected,.target,.line-highlight').forEach(el=>el.classList.remove('selected','target','line-highlight'));
+    document.querySelectorAll('[aria-pressed="true"]').forEach(el=>el.setAttribute('aria-pressed','false'));
+  },
+  onCellDrop:place,
+  onRackDrop:(id,beforeId)=>{
+    if(beforeId!==null&&beforeId!==id){order.splice(order.indexOf(id),1);order.splice(order.indexOf(beforeId),0,id);}
+    const source=game.board.indexOf(id);
+    if(source!==-1)changed(removeTile(game.board,source,game.locked),'Back on the rack. Try another spot.');
+    else { render();announce('Your tiles, your order.'); }
+    $(`[data-tile="${id}"]`)?.focus({preventScroll:true});
+  }
+});
 setInterval(()=>{const now=performance.now();if(game.started&&!game.won&&!document.hidden&&!modal.open){game.elapsed+=(now-lastTick)/1000;$('#timer').textContent=fmt(game.elapsed);save();}lastTick=now;},1000);
 document.addEventListener('visibilitychange',()=>{lastTick=performance.now();save();});
 render();if(game.won)announce('Eight words. Perfect numbers. Ready for another?');
@@ -144,10 +170,10 @@ render();if(game.won)announce('Eight words. Perfect numbers. Ready for another?'
 // The same actions are available to browsers that support WebMCP.
 if(document.modelContext?.registerTool){
   const lifecycle=new AbortController();
-  const state=()=>({round:game.round+1,board:game.board.map(id=>id===null?null:puzzle.tiles[id]),available:puzzle.tiles.filter(t=>!game.board.includes(t.id)),hintsRemaining:game.hints,...evaluateBoard(game.board,puzzle)});
+  const state=()=>({round:game.round+1,board:game.board.map(id=>id===null?null:puzzle.tiles[id]),available:puzzle.tiles.filter(t=>!game.board.includes(t.id)),hintsRemaining:game.hints,lockedCells:[...game.locked],...evaluateBoard(game.board,puzzle)});
   const tools=[
     {name:'get_grid_blitz_state',description:'Read the current Grid Blitz board, available tiles, and word/number progress.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true},execute:()=>state()},
-    {name:'place_grid_blitz_tile',description:'Move one available or placed tile into a square. Occupied squares swap or return a tile to the rack. Tile IDs and positions are zero-based. The center is fixed.',inputSchema:{type:'object',properties:{tileId:{type:'integer',minimum:0,maximum:8},position:{type:'integer',minimum:0,maximum:8}},required:['tileId','position'],additionalProperties:false},annotations:{readOnlyHint:false},execute:input=>{if(game.won)throw new Error('Puzzle is complete.');const next=moveTile(game.board,input.tileId,input.position);changed(next,'Tile placed.',input.position);return state();}},
+    {name:'place_grid_blitz_tile',description:'Move one available or placed tile into a square. Occupied squares swap or return a tile to the rack. Tile IDs and positions are zero-based. Green center and hint tiles are permanently locked.',inputSchema:{type:'object',properties:{tileId:{type:'integer',minimum:0,maximum:8},position:{type:'integer',minimum:0,maximum:8}},required:['tileId','position'],additionalProperties:false},annotations:{readOnlyHint:false},execute:input=>{if(game.won)throw new Error('Puzzle is complete.');const next=moveTile(game.board,input.tileId,input.position,game.locked);changed(next,'Tile placed.',input.position);return state();}},
     {name:'check_grid_blitz',description:'Validate all eight words and the number constraints, and finish the puzzle if solved.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false},execute:()=>{if(!game.won)check();return state();}}
   ];
   for(const tool of tools){try{Promise.resolve(document.modelContext.registerTool(tool,{signal:lifecycle.signal})).catch(()=>{});}catch{}}
