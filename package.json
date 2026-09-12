@@ -7,6 +7,11 @@
   "scripts": {
     "dev": "python3 -m http.server 5173 --bind 0.0.0.0 --directory dist",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/engine.js"
+    "check": "node --check dist/app.js && node --check dist/engine.js",
+    "assets": "node scripts/generate-assets.mjs",
+    "build": "npm run check && node scripts/validate-site.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.4"
   }
 }

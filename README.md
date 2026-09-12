@@ -30,3 +30,15 @@ The app uses plain HTML, CSS, and JavaScript, a self-hosted Inter variable font,
 ## Font
 
 Inter by Rasmus Andersson, distributed under the SIL Open Font License. See `dist/fonts/OFL.txt`.
+
+## Production and sharing
+
+- Play: https://gridblitz.superfun.games/
+- Repository: https://github.com/superfunteam/gridblitz
+- Netlify publishes `dist/` from `main`, using the settings in `netlify.toml`.
+- `npm ci` installs development dependencies; the game itself has no runtime dependencies.
+- `npm run build` validates JavaScript, metadata, manifests, and image dimensions.
+- `npm run assets` recreates app/touch icons, multi-size favicon.ico, and the 1200×630 social image from `assets/`.
+- `netlify deploy --prod --dir=dist` publishes via the linked CLI project.
+
+Open Graph and Twitter cards use `dist/og-image.png`. The app includes SVG/PNG/ICO favicons, an Apple touch icon, standard and maskable web-app icons, a pinned-tab icon, theme colors, canonical metadata, robots.txt, and sitemap.xml. Home-screen launches use standalone display; offline caching is not implemented.
